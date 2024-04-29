@@ -1,0 +1,128 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"languageName":"csharp","name":"csharp"}]}}
+
+#!markdown
+
+# TPL Dataflow, what is it and what can you use it for?
+<img src="Rube-Goldberg-machine-gif.gif">
+
+**TPL Dataflow is a somewhat lesser known component in what is called Task Parallel Library.**
+
+**From its web page:**<br>
+_"The TPL Dataflow Library provides a foundation for message passing and parallelizing CPU-intensive and I/O-intensive applications that have high throughput and low latency._<br>
+_It also gives you explicit control over how data is buffered and moves around the system."_
+
+**ELI5:**<br>
+TPL Dataflow is like channels with bells and whistles, or LINQ where every `.Select` runs its own thread.
+
+#!markdown
+
+# Demo use case
+
+We want to read data from an external service `Source`, run it through `Process` and write it to a DB using `Write`.
+
+#!mermaid
+
+flowchart LR
+input(("Source 🫛")) --> Process --> Write[(Write)]
+
+#!markdown
+
+## Create simulated processing
+Each processing will take half a second.
+
+#!csharp
+
+#!import "prepare.cs"
+
+async Task<string> Process(string input)
+{
+    // Processing a vegetable takes half a second
+    await Task.Delay(TimeSpan.FromSeconds(0.5));
+
+    // Vegetable is duplicated 
+    return $"{input}{input} ";
+}
+
+#!markdown
+
+## Create simulated database write
+Each database write will take one second.
+
+#!csharp
+
+async Task Write(string input)
+{
+    // Writing vegetable to database takes one second
+    await Task.Delay(TimeSpan.FromSeconds(1));
+
+    Console.Write(input);
+}
+
+#!markdown
+
+## Naive implementation of our processing pipeline
+
+**Question to audience:** How long will it take to process 10 vegetables?
+
+#!csharp
+
+var watch = Stopwatch.StartNew();
+
+// Take 10 vegetables
+foreach (var vegetable in vegetables.Take(10))
+{
+    // Process vegetable
+    var processed = await Process(vegetable);
+
+    // Write vegetable
+    await Write(processed);
+}
+
+Console.WriteLine($"\n\nElapsed time: {watch.Elapsed.TotalSeconds} seconds.");
+
+#!markdown
+
+## Dataflow implementation
+
+#!mermaid
+
+flowchart LR
+veg(("Source 🫛")) --> tb["TransformBlock&lt;string, string&gt;(Process)"] --> ab["ActionBlock&lt;string&gt;(Write)"]
+
+#!markdown
+
+**Question to audience:**
+1. How long does it take to do the same as above with TPL Dataflow?
+1. How can we speed it up?
+1. What happens when we increase the amount of vegetables?
+
+#!csharp
+
+const int parallelism = 1;          // <== Hint
+const int amountOfVegetables = 10;
+
+var watch = Stopwatch.StartNew();
+
+// Setting dataflow options
+var options = new ExecutionDataflowBlockOptions { MaxDegreeOfParallelism = parallelism };
+// Setup TransformBlock wrapping Process
+var processBlock = new TransformBlock<string, string>(Process, options);
+// Setup ActionBlock wrapping Write
+var writeBlock = new ActionBlock<string>(Write, options);
+
+// Link Process to Write and make sure completion is propagated
+processBlock.LinkTo(writeBlock, new() {PropagateCompletion = true});
+
+// Feed dataflow with vegetables
+foreach (var vegetable in vegetables.Take(amountOfVegetables))
+{
+    await processBlock.SendAsync(vegetable);
+}
+
+// Signal complete and wait for completion on the last block
+processBlock.Complete();
+await writeBlock.Completion;
+
+Console.WriteLine($"\n\nElapsed time: {watch.Elapsed.TotalSeconds} seconds.");

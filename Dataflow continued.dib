@@ -1,0 +1,118 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"languageName":"csharp","name":"csharp"}]}}
+
+#!markdown
+
+# Dataflow continued
+
+#!markdown
+
+## Setting up a JoinBlock
+
+#!mermaid
+
+flowchart LR
+vegetables --> plus(("+")) --> jb["JoinBlock&ltstring, string&gt"] --> ab["ActionBlock&ltstring&gt(Console.Write)"]
+fruits --> plus
+
+#!csharp
+
+#!import "prepare.cs"
+
+var vegetableBlock = new BufferBlock<string>();
+var fruitBlock = new BufferBlock<string>();
+var joinBlock = new JoinBlock<string, string>();
+var writeBlock = new ActionBlock<Tuple<string, string>>(Console.Write);
+
+vegetableBlock.LinkTo(joinBlock.Target1);
+fruitBlock.LinkTo(joinBlock.Target2, new() {PropagateCompletion = true});
+joinBlock.LinkTo(writeBlock, new() {PropagateCompletion = true});
+
+foreach (var fruit in fruits.Take(20))
+{
+    fruitBlock.Post(fruit);
+}
+
+foreach (var vegetable in vegetables.Take(20))
+{
+    vegetableBlock.Post(vegetable);
+}
+
+fruitBlock.Complete();
+await writeBlock.Completion;
+
+#!markdown
+
+## Setting up a TransformManyBlock
+
+#!mermaid
+
+flowchart LR
+vegetables --> tb["TransformManyBlock&ltstring, string&gt(m => Enumerable.Repeat(m, 2))"] --> v1["veg"] -.- v2["veg"] -.- v3["veg"]
+
+#!csharp
+
+var duplicateBlock = new TransformManyBlock<string, string>(m => Enumerable.Repeat(m, 2));
+var writeBlock = new ActionBlock<string>(Console.Write);
+duplicateBlock.LinkTo(writeBlock, new() {PropagateCompletion = true});
+
+foreach (var veg in vegetables.Take(20))
+{
+    duplicateBlock.Post(veg);
+}
+
+duplicateBlock.Complete();
+await writeBlock.Completion;
+
+#!markdown
+
+## Setting up a BroadcastBlock
+
+#!mermaid
+
+flowchart LR
+vegetables --> bb["BroadCastBlock&ltstring&gt(m => (string)m.Clone())"] --> p(("+")) --> ab1
+ab1["ActionBlock&ltstring&gt(m => Console.Write((1, m)))"]
+ab2["ActionBlock&ltstring&gt(m => Console.Write((2, m)))"]
+p --> ab2
+
+#!csharp
+
+var duplicateBlock = new BroadcastBlock<string>(m => (string)m.Clone());
+var writeBlock1 = new ActionBlock<string>(m => Console.Write((1, m)));
+var writeBlock2 = new ActionBlock<string>(m => Console.Write((2, m)));
+duplicateBlock.LinkTo(writeBlock1, new() {PropagateCompletion = true});
+duplicateBlock.LinkTo(writeBlock2, new() {PropagateCompletion = true});
+
+foreach (var veg in vegetables.Take(10))
+{
+    duplicateBlock.Post(veg);
+}
+
+duplicateBlock.Complete();
+await writeBlock1.Completion;
+await writeBlock2.Completion;
+
+#!markdown
+
+## Setting up a BatchBlock
+
+#!mermaid
+
+flowchart LR
+bb["BatchBlock&lt;string&gt;(20)"] --> ab["ActionBlock&lt;string[]&gt;(s => Console.WriteLine(string.Join(&quot;, &quot;, s)))"]
+
+#!csharp
+
+var batchBlock = new BatchBlock<string>(20);
+var writeBlock = new ActionBlock<string[]>(s => Console.WriteLine(string.Join(", ", s)));
+batchBlock.LinkTo(writeBlock, new() { PropagateCompletion = true });
+
+foreach (var veg in vegetables.Take(119))
+{
+    batchBlock.Post(veg);
+}
+
+batchBlock.Complete();
+await writeBlock.Completion;

@@ -1,0 +1,156 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"languageName":"csharp","name":"csharp"}]}}
+
+#!markdown
+
+# Dataflow basics
+
+#!markdown
+
+## Setting up a BufferBlock.
+
+A `BufferBlock` is very similar to channels in Go.
+
+#!mermaid
+
+flowchart LR
+input((input)) --> bb["BufferBlock&ltstring&gt"] --> output((output))
+
+#!csharp
+
+#!import "prepare.cs"
+
+var bufferblock = new BufferBlock<string>();
+
+foreach (var fruit in fruits.Take(20))
+{
+    bufferblock.Post(fruit);
+}
+
+while (bufferblock.Count > 0)
+{
+    Console.Write(bufferblock.Receive());
+}
+
+#!markdown
+
+## Setting up an ActionBlock
+
+#!mermaid
+
+flowchart LR
+source((source)) --> ab["ActionBlock&lt;string&gt;(s => Console.Write(s))"]
+
+#!csharp
+
+var actionBlock = new ActionBlock<string>(s => Console.Write(s));
+
+// Post 50 fruits.
+foreach (var fruit in fruits.Take(50))
+{
+    actionBlock.Post(fruit);
+}
+
+// Signal that we're finished.
+actionBlock.Complete();
+
+// Wait until we're finished.
+await actionBlock.Completion;
+
+#!markdown
+
+## Using ActionBlock as a worker queue
+
+#!csharp
+
+var workerQueue = new ActionBlock<Action>(a => a.Invoke());
+
+workerQueue.Post(() => Console.WriteLine("Hello World!"));
+
+workerQueue.Complete();
+await workerQueue.Completion;
+
+#!markdown
+
+## Setting up a TransformBlock
+
+#!mermaid
+
+flowchart LR
+input((input)) --> tb["TransformBlock&lt;string, string&gt;"] --> output((output)) 
+
+#!csharp
+
+var transformer = new TransformBlock<string, string>(m => m switch
+{
+    "🍌" => "banana ",
+    "🍊" => "orange ",
+    "🍍" => "pineapple",
+    "🍉" => "watermelon",
+    "🍏" => "apple",
+    var a => a
+});
+
+foreach(var fruit in fruits.Take(20))
+{
+    transformer.Post(fruit);
+}
+
+while(transformer.InputCount > 0 || transformer.OutputCount > 0)
+{
+    Console.WriteLine(transformer.Receive());
+}
+
+#!markdown
+
+## Linking blocks 
+
+#!mermaid
+
+flowchart LR
+bb["BufferBlock&lt;string&gt;"] --> tb["TransformBlock&lt;string, string&gt;"] --> ab["ActionBlock&lt;string&gt;(Console.WriteLine)"]
+
+#!csharp
+
+var bb = new BufferBlock<string>();
+var tb = new TransformBlock<string, string>(m => $"{m}{m} ");
+var ab = new ActionBlock<string>(Console.Write);
+
+bb.LinkTo(tb, new() {PropagateCompletion = true});
+tb.LinkTo(ab, new() {PropagateCompletion = true});
+
+foreach (var fruit in fruits.Take(20))
+{
+    bb.Post(fruit);
+}
+
+bb.Complete();
+await ab.Completion;
+
+#!markdown
+
+## Linking blocks with predicate
+
+#!mermaid
+
+flowchart LR
+sourceBlock -- "fruit => fruit == \"🍌\"" --> bb["ActionBlock&lt;string&gt;(b => Console.WriteLine($&quot;banana: {b}&quot;))"]
+sourceBlock --> ob["ActionBlock&lt;string&gt;(o => Console.WriteLine($&quot;other: {o}&quot;))"]
+
+#!csharp
+
+var sourceBlock = new BufferBlock<string>();
+var bananasBlock = new ActionBlock<string>(b => Console.WriteLine($"banana: {b}"));
+var otherBlock = new ActionBlock<string>(o => Console.WriteLine($"other: {o}"));
+
+sourceBlock.LinkTo(bananasBlock, new() { PropagateCompletion = true }, fruit => fruit == "🍌");
+sourceBlock.LinkTo(otherBlock, new() { PropagateCompletion = true });
+
+foreach (var fruit in fruits.Take(20))
+{
+    sourceBlock.Post(fruit);
+}
+
+sourceBlock.Complete();
+await Task.WhenAll([bananasBlock.Completion, otherBlock.Completion]);
