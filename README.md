@@ -1,4 +1,4 @@
-# tpl-dataflow-presentation
+# TPL Dataflow presentation
 
 You should be able to open the presentation if you've fulfilled these requirements:
 - Installed VS Code
